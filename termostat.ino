@@ -4,9 +4,18 @@
 #include <OneWire.h>
 
 #define LED_PIN 2
+#define COOLER_PIN 3
+#define HEATER_PIN 4
 #define IN_PIN A5
 #define INNER_TEMP_PIN 10
 #define OUTER_TEMP_PIN 11
+
+#define HEATING_TEMP 1.0
+#define COOLING_TEMP 4.5
+#define HYST_TEMP 0.5
+
+#define MIN(a,b) (((a)<(b))?(a):(b))
+#define MAX(a,b) (((a)>(b))?(a):(b))
 
 typedef enum status_t {
   STATUS_SUCCESS = 0,
@@ -183,6 +192,156 @@ class Ds18TempSensor {
       Serial.println("");
     } 
 };
+
+
+
+
+class Termostat {
+  private:
+    enum {
+      TM_COOLER_ON = 0,
+      TM_COOLER_OFF = 1,
+      TM_HEATER_ON = 0,
+      TM_HEATER_OFF = 1,      
+      TM_LED_ON = 1,
+      TM_LED_OFF = 0       
+    };
+    
+    enum {
+      TM_STATE_INIT,
+      TM_STATE_NORM,
+      TM_STATE_TO_COLD,
+      TM_STATE_HEATING,
+      TM_STATE_TO_HOT,
+      TM_STATE_COOLING,
+      TM_STATE_ERROR
+    };
+
+    // Heating temperature
+    float hTemp;
+    // Cooling temperature
+    float cTemp;
+    // Temperature hysteresis
+    float hTemp;
+    uint8_t state;
+    Ds18TempSensor innerSensor;
+    Ds18TempSensor outerSensor;
+     
+  public:
+    Termostat(float heatingTemp = HEATING_TEMP,
+              float collingTemp = COOLING_TEMP,
+              float hystTemp = HYST_TEMP): 
+        hTemp(heatingTemp),
+        cTemp(collingTemp),
+        hTemp(hystTemp),
+        state(TM_STATE_INIT),
+        innerSensor(INNER_TEMP_PIN),
+        outerSensor(OUTER_TEMP_PIN)  
+    {
+    }
+    
+    status_t init() {
+      status_t status = STATUS_SUCCESS;
+      
+      status = innerSensor.init();
+      if (status != STATUS_SUCCESS) {
+        LOG64_SET("Could not initialize inner temperature sensor.");
+        LOG64_NEW_LINE;
+        state = TM_STATE_ERROR;
+        return status;
+      }
+      
+      status = outerSensor.init();
+      if (status != STATUS_SUCCESS) {
+        LOG64_SET("Could not initialize outer temperature sensor.");
+        LOG64_NEW_LINE;
+        state = TM_STATE_ERROR;
+        return status;
+      }
+
+      digitalWrite(COOLER_PIN, TM_COOLER_OFF); 
+      digitalWrite(HEATER_PIN, TM_HEATER_OFF);
+
+      state = TM_STATE_NORM;
+          
+      return STATUS_SUCCESS;
+    }
+    
+    void loop () {
+      // TODO: Read temperature from sensors here
+      
+      switch (state) {
+        case TM_STATE_NORM:
+          //LOG64_SET("TM_STATE_NORM"); LOG64_NEW_LINE;
+          //state = DS_STATE_START_CONVERSION;
+
+          // Cooler and heater have to be disabled when 
+          // temperature is normal.
+          if (digitalRead(COOLER_PIN) != TM_COOLER_OFF) {
+            digitalWrite(COOLER_PIN, TM_COOLER_OFF); 
+          }
+
+          if (digitalRead(HEATER_PIN) != TM_HEATER_OFF) {
+            digitalWrite(HEATER_PIN, TM_HEATER_OFF); 
+          }
+
+          // TODO: Add conditions to move to proper state here
+          break;
+        case TM_STATE_TO_COLD:
+          //LOG64_SET("TM_STATE_TO_COLD"); LOG64_NEW_LINE;
+          state = TM_STATE_HEATING;
+          break;
+        case TM_STATE_HEATING:
+          //LOG64_SET("TM_STATE_HEATING"); LOG64_NEW_LINE;
+          break;
+        case TM_STATE_TO_HOT: {
+          //LOG64_SET("TM_STATE_TO_HOT"); LOG64_NEW_LINE;
+          break;
+        }
+        case TM_STATE_COOLING:
+          //LOG64_SET("TM_STATE_COOLING"); LOG64_NEW_LINE;
+          break;
+        case TM_STATE_ERROR:
+          //LOG64_SET("TM_STATE_ERROR"); LOG64_NEW_LINE;
+          break;
+        default:
+          break;
+      }
+    }
+    
+    void dump() {
+      if (state == DS_STATE_START) {
+        Serial.println("Device is not initialized!");
+        return;
+      }
+      
+      Serial.print("ROM =");
+      for(uint8_t i = 0; i < DS_ADDR_SIZE; i++) {
+        Serial.write(' ');
+        Serial.print(addr[i], HEX);
+      }
+
+      switch (addr[0]) {
+        case DS18S20:
+          Serial.println("  Chip = DS18S20");
+          break;
+        case DS18B20:
+          Serial.println("  Chip = DS18B20");
+          break;
+        case DS1822:
+          Serial.println("  Chip = DS1822");
+          break;
+        default:
+          Serial.println("Device is not a DS18x20 family device.");
+          return;        
+      }
+   
+      Serial.println("");
+      Serial.println("");
+    } 
+};
+
+
 
 Ds18TempSensor innerTempSensor(INNER_TEMP_PIN);
 Ds18TempSensor outerTempSensor(OUTER_TEMP_PIN);
