@@ -210,19 +210,19 @@ class Termostat {
     enum {
       TM_STATE_INIT,
       TM_STATE_NORM,
-      TM_STATE_TO_COLD,
+      TM_STATE_TOO_COLD,
       TM_STATE_HEATING,
-      TM_STATE_TO_HOT,
+      TM_STATE_TOO_HOT,
       TM_STATE_COOLING,
       TM_STATE_ERROR
     };
 
-    // Heating temperature
-    float hTemp;
-    // Cooling temperature
-    float cTemp;
+    // Temperature when heating should start
+    const float hTemp;
+    // Temperature when cooling should start
+    const float cTemp;
     // Temperature hysteresis
-    float hTemp;
+    const float hystTemp;
     uint8_t state;
     Ds18TempSensor innerSensor;
     Ds18TempSensor outerSensor;
@@ -268,15 +268,15 @@ class Termostat {
     }
     
     void loop () {
-      // TODO: Read temperature from sensors here
+      float innerTemp = innerSensor.readTemp();
+      float outerTemp = outerSensor.readTemp();
       
       switch (state) {
         case TM_STATE_NORM:
           //LOG64_SET("TM_STATE_NORM"); LOG64_NEW_LINE;
-          //state = DS_STATE_START_CONVERSION;
 
           // Cooler and heater have to be disabled when 
-          // temperature is normal.
+          // temperature is within the range.
           if (digitalRead(COOLER_PIN) != TM_COOLER_OFF) {
             digitalWrite(COOLER_PIN, TM_COOLER_OFF); 
           }
@@ -285,21 +285,60 @@ class Termostat {
             digitalWrite(HEATER_PIN, TM_HEATER_OFF); 
           }
 
-          // TODO: Add conditions to move to proper state here
+          if (innerTemp < hTemp) {
+            state = TM_STATE_TOO_COLD;
+          } else if (innerTemp > cTemp) {
+            state = TM_STATE_TOO_HOT;
+          }
           break;
-        case TM_STATE_TO_COLD:
-          //LOG64_SET("TM_STATE_TO_COLD"); LOG64_NEW_LINE;
+        case TM_STATE_TOO_COLD:
+          //LOG64_SET("TM_STATE_TOO_COLD"); LOG64_NEW_LINE;
           state = TM_STATE_HEATING;
           break;
         case TM_STATE_HEATING:
           //LOG64_SET("TM_STATE_HEATING"); LOG64_NEW_LINE;
+          if (digitalRead(HEATER_PIN) == TM_HEATER_OFF) {
+            digitalWrite(HEATER_PIN, TM_HEATER_ON); 
+          }
+
+          // In order to avoid frequent heater flapping
+          // disable heating only when inner temp
+          // is higher than heating temp + hysteresis temp
+          if (innerTemp > (hTemp + hystTemp)) {
+            state = TM_STATE_NORM;
+          }
           break;
-        case TM_STATE_TO_HOT: {
-          //LOG64_SET("TM_STATE_TO_HOT"); LOG64_NEW_LINE;
+        case TM_STATE_TOO_HOT: {
+          //LOG64_SET("TM_STATE_TOO_HOT"); LOG64_NEW_LINE;
+          if (digitalRead(COOLER_PIN) != TM_COOLER_OFF) {
+            digitalWrite(COOLER_PIN, TM_COOLER_OFF); 
+          }
+          
+          // We're coolling using air from outdoor so its temp 
+          // should be lower than the inner one more than 
+          // hystTemp for cooling to take effect          
+          if (innerTemp > (MAX(cTemp, outerTemp + hystTemp)) {
+            state = TM_STATE_COOLING;    
+          }
           break;
         }
         case TM_STATE_COOLING:
           //LOG64_SET("TM_STATE_COOLING"); LOG64_NEW_LINE;
+          if (digitalRead(COOLER_PIN) == TM_COOLER_OFF) {
+            digitalWrite(COOLER_PIN, TM_COOLER_ON); 
+          }
+
+          // Cooling should be stopped in the folowing cases:
+          // 1. Inner temp reached value lower than either
+          // cTemp - hystTemp(in this case outerTemp is lower than that) or
+          // outerTemp + hystTemp.
+          // 2. innerTemp temp is not yet lower than outer one but the outerTemp
+          // started to rise since coolling has been enabled and the difference
+          // between them is less than hysteresis. 
+          if (innerTemp < (MAX(cTemp - hystTemp, outerTemp + hystTemp)) || 
+              (outerTemp >= (innerTemp + hystTemp))) {
+            state = (innerTemp < cTemp) ? TM_STATE_NORM : TM_STATE_TOO_HOT;    
+          }
           break;
         case TM_STATE_ERROR:
           //LOG64_SET("TM_STATE_ERROR"); LOG64_NEW_LINE;
@@ -314,31 +353,7 @@ class Termostat {
         Serial.println("Device is not initialized!");
         return;
       }
-      
-      Serial.print("ROM =");
-      for(uint8_t i = 0; i < DS_ADDR_SIZE; i++) {
-        Serial.write(' ');
-        Serial.print(addr[i], HEX);
-      }
-
-      switch (addr[0]) {
-        case DS18S20:
-          Serial.println("  Chip = DS18S20");
-          break;
-        case DS18B20:
-          Serial.println("  Chip = DS18B20");
-          break;
-        case DS1822:
-          Serial.println("  Chip = DS1822");
-          break;
-        default:
-          Serial.println("Device is not a DS18x20 family device.");
-          return;        
-      }
-   
-      Serial.println("");
-      Serial.println("");
-    } 
+    }
 };
 
 
